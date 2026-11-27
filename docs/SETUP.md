@@ -66,6 +66,10 @@ settings → Change visibility) so Azure can pull it.
 
 ## 6. Add the non-Azure VM (optional)
 
+Using Proxmox? Follow [deploy/homelab/proxmox-lxc.md](../deploy/homelab/proxmox-lxc.md),
+which covers the container, the runner and the lock-down steps. The generic
+version is below.
+
 1. On your workstation, get a registration token (valid about an hour):
    `gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token --jq .token`
 2. On the VM (Debian/Ubuntu with Docker and the compose plugin):

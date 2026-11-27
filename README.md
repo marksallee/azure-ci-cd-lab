@@ -1,28 +1,63 @@
-# Azure CI/CD lab: dev → staging → prod, plus a non-Azure VM
+# Azure CI/CD lab: from commit to production, in the cloud and on-prem
 
-A small, low-cost reference pipeline that builds one container image and
-promotes that exact digest through three Azure environments, with a manual
-approval gate before prod. A self-hosted runner on a VM outside Azure runs the
-same image, to show the pipeline is not tied to one cloud.
+## The scenario
 
-The application is deliberately tiny so the pipeline is the subject.
+A company wants a safe, repeatable way to ship software. This lab builds that
+pipeline end to end:
 
-```text
-push to main
-   │
- build ── test, build multi-arch image, push to GHCR, output image@sha256:digest
-   │
- dev ───── terraform apply (Azure Container Apps) + smoke test      [auto]
-   │
- staging ─ terraform apply + smoke test                             [auto]
-   │
- homelab ─ docker compose on a VM via self-hosted runner           [auto, optional]
-   │
- prod ──── ⏸ required reviewer approves ─► terraform apply + smoke   [manual gate]
+- Every change is **tested automatically** by GitHub Actions.
+- It is built **once**, then moved through **dev → staging → prod** on Azure.
+- The same build also runs on an **on-premises VM** (a Proxmox home lab here), to
+  show the pipeline isn't tied to a single cloud.
+- Nothing reaches production until the **unit tests pass** and an **engineer
+  approves** it.
+
+The sample app is deliberately tiny, so the pipeline is the interesting part. On
+Azure it runs as a container (Azure Container Apps), so there are no servers to
+patch.
+
+## How a change travels
+
+1. An engineer pushes code to `main`.
+2. **Unit tests run.** If they fail, the pipeline stops and nothing is deployed.
+3. The app is **built into one container image**, which is stored in a registry.
+4. That exact image is deployed to **dev**, then **staging** on Azure. After each
+   deploy, an automatic check confirms the right version is running.
+5. Optionally, the same image is deployed to an **on-premises VM** through a
+   self-hosted runner (switched on with a repo variable).
+6. The pipeline **pauses and waits for an engineer to approve**. Only then does the
+   same image go to **prod**.
+
+```mermaid
+flowchart LR
+    eng(["👩‍💻 Engineer<br/>pushes code"])
+
+    subgraph gh ["GitHub Actions"]
+        direction LR
+        tests{{"✅ Unit tests"}} --> build["📦 Build one image<br/>(amd64 + arm64)"]
+    end
+
+    subgraph az ["Azure"]
+        direction LR
+        dev["🧪 Dev"] --> stg["🔍 Staging"]
+        prod["🚀 Prod"]
+    end
+
+    subgraph onprem ["On-premises (Proxmox)"]
+        vm["🏠 Self-hosted<br/>runner + Docker"]
+    end
+
+    eng --> tests
+    build --> dev
+    stg --> vm
+    vm --> gate{{"🙋 Engineer<br/>approves?"}}
+    gate -- "yes" --> prod
+    tests -. "fail: stop" .-> stop(["⛔ Nothing deployed"])
 ```
 
-Every smoke test calls `/version` and checks that it returns the commit SHA that
-was just deployed, so each stage proves which build is running where.
+The same image is promoted at every step, never rebuilt, so what passed in
+staging is exactly what runs in prod. Each stage's check confirms it by
+asking the app for its version and comparing it to the commit that was deployed.
 
 ## What it demonstrates
 

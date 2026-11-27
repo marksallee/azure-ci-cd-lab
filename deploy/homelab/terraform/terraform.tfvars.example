@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (git-ignored) and adjust. Contains no secrets.
+# The API token is read from the PROXMOX_VE_API_TOKEN environment variable.
+proxmox_endpoint = "https://<proxmox-host>:8006/"
+node_name        = "<node-name>" # exactly as shown under Datacenter in the Proxmox UI
+vm_id            = 300
+address          = "192.168.1.50/24" # verify it is free and outside the DHCP pool
+gateway          = "192.168.1.1"
+dns_servers      = ["192.168.1.1"]
+ssh_public_keys  = ["ssh-ed25519 AAAA... you@laptop"]
+# datastore_id   = "local-lvm"
