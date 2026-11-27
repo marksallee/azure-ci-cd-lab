@@ -13,9 +13,10 @@ cd ..
 dotnet test dotnet/BuildInfo.Tests             # needs the .NET 10 SDK; CI runs it anyway
 ```
 
-Push the repo and let `ci.yml` run. The deploy jobs in `cd.yml` only run on
-pushes to `main`, and they fail until the Azure variables exist, so do the Azure
-steps below only when you are ready.
+Push the repo and let `ci.yml` run. On `main`, `cd.yml` builds and tests, but the
+Azure stages are skipped until the repo variable `ENABLE_AZURE` is `true` (step 4
+sets it), and the VM stage is skipped until `ENABLE_HOMELAB` is `true`. So a push
+never creates cloud resources by surprise.
 
 ## 1. GitHub repository
 

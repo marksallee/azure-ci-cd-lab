@@ -67,7 +67,12 @@ jobs:
       - id: ref
         run: echo "image=${IMAGE_NAME}@${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
+  # The Azure stages run only when the repo variable ENABLE_AZURE is "true"
+  # (set by scripts/configure-github.sh after the Azure bootstrap). Until then
+  # a push to main just builds and tests, and staging/prod are skipped because
+  # they depend on dev.
   deploy-dev:
+    if: ${{ vars.ENABLE_AZURE == 'true' }}
     permissions:
       id-token: write
       contents: read
@@ -94,7 +99,9 @@ jobs:
   # variable ENABLE_HOMELAB is "true", so the pipeline never hangs on an
   # offline runner.
   deploy-homelab:
-    if: ${{ vars.ENABLE_HOMELAB == 'true' }}
+    # Independent of Azure: runs when staging succeeded OR was skipped
+    # (ENABLE_AZURE off), as long as the build passed.
+    if: ${{ !cancelled() && vars.ENABLE_HOMELAB == 'true' && needs.build.result == 'success' && (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped') }}
     needs: [build, deploy-staging]
     runs-on: [self-hosted, homelab]
     environment:

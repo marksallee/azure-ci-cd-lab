@@ -23,6 +23,9 @@ gh variable set AZURE_TENANT_ID       --repo "$REPO" --body "$AZURE_TENANT_ID"
 gh variable set AZURE_SUBSCRIPTION_ID --repo "$REPO" --body "$AZURE_SUBSCRIPTION_ID"
 gh variable set TFSTATE_RG            --repo "$REPO" --body "$TFSTATE_RG"
 gh variable set TFSTATE_SA            --repo "$REPO" --body "$TFSTATE_SA"
+# Turns on the dev/staging/prod Azure stages. This script is only run after the
+# Azure bootstrap, so enabling them here is the deliberate switch.
+gh variable set ENABLE_AZURE          --repo "$REPO" --body "true"
 # Flip to "true" once the self-hosted runner on the VM is online.
 gh variable set ENABLE_HOMELAB        --repo "$REPO" --body "false"
 
