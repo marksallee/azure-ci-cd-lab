@@ -19,7 +19,17 @@ case "$(uname -m)" in
   *) echo "unsupported arch"; exit 1 ;;
 esac
 
-VER="$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')"
+# Latest runner version. Override with RUNNER_VERSION=2.xxx.x if the API is unreachable.
+# The response is saved to a file first: piping curl into `grep -m1` closes the
+# pipe early and makes curl fail with exit code 23 under `set -o pipefail`.
+VER="${RUNNER_VERSION:-}"
+if [ -z "$VER" ]; then
+  tmp="$(mktemp)"
+  curl -fsSL https://api.github.com/repos/actions/runner/releases/latest -o "$tmp"
+  VER="$(sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' "$tmp" | head -n1)"
+  rm -f "$tmp"
+fi
+[ -n "$VER" ] || { echo "could not determine the runner version; set RUNNER_VERSION"; exit 1; }
 mkdir -p "$RUNNER_DIR" && cd "$RUNNER_DIR"
 curl -fsSL -o runner.tgz "https://github.com/actions/runner/releases/download/v${VER}/actions-runner-linux-${ARCH}-${VER}.tar.gz"
 tar xzf runner.tgz && rm runner.tgz

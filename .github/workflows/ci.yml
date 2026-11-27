@@ -38,6 +38,13 @@ jobs:
         working-directory: infra
       - run: terraform validate
         working-directory: infra
+      # The Proxmox runner container config is validated too (no Proxmox access needed)
+      - run: terraform fmt -check -recursive
+        working-directory: deploy/homelab/terraform
+      - run: terraform init -backend=false
+        working-directory: deploy/homelab/terraform
+      - run: terraform validate
+        working-directory: deploy/homelab/terraform
 
   docker-build:
     runs-on: ubuntu-latest
