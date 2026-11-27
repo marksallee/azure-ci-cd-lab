@@ -1,0 +1,137 @@
+name: CD
+
+# Build ONCE, promote the same immutable image digest through every stage:
+#   build -> dev -> staging -> (homelab VM) -> prod  [prod waits for manual approval]
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet-test:
+    # Same pipeline pattern for a .NET project: restore, build, test.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet test dotnet/BuildInfo.Tests --configuration Release
+
+  build:
+    needs: dotnet-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.ref.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s app/tests -v
+
+      - uses: docker/setup-qemu-action@v3 # emulation so one runner can build arm64 too
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase image name (GHCR requires lowercase)
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Multi-arch manifest: the single digest we promote resolves to the
+          # right image on x86 cloud hosts, the home-lab VM, or ARM boards.
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - id: ref
+        run: echo "image=${IMAGE_NAME}@${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  deploy-dev:
+    permissions:
+      id-token: write
+      contents: read
+    needs: build
+    uses: ./.github/workflows/_deploy-azure.yml
+    with:
+      environment: dev
+      image: ${{ needs.build.outputs.image }}
+      version: ${{ github.sha }}
+
+  deploy-staging:
+    permissions:
+      id-token: write
+      contents: read
+    needs: [build, deploy-dev]
+    uses: ./.github/workflows/_deploy-azure.yml
+    with:
+      environment: staging
+      image: ${{ needs.build.outputs.image }}
+      version: ${{ github.sha }}
+
+  # Non-Azure target: a VM on my own hardware, reached through a self-hosted
+  # runner (outbound-only connection to GitHub). Skipped unless the repo
+  # variable ENABLE_HOMELAB is "true", so the pipeline never hangs on an
+  # offline runner.
+  deploy-homelab:
+    if: ${{ vars.ENABLE_HOMELAB == 'true' }}
+    needs: [build, deploy-staging]
+    runs-on: [self-hosted, homelab]
+    environment:
+      name: homelab
+    concurrency:
+      group: deploy-homelab
+      cancel-in-progress: false
+    env:
+      IMAGE: ${{ needs.build.outputs.image }}
+      APP_VERSION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull image and (re)start with docker compose
+        working-directory: deploy/homelab
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker compose pull
+          docker compose up -d --remove-orphans
+      - name: Smoke test (health + exact build SHA)
+        run: |
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:8081/healthz >/dev/null && break
+            echo "waiting ($i/20)"; sleep 3
+          done
+          body=$(curl -fsS http://localhost:8081/version)
+          echo "$body"
+          echo "$body" | grep -q "\"version\": \"${APP_VERSION}\"" || { echo "::error::version mismatch"; exit 1; }
+
+  deploy-prod:
+    # Runs when staging passed and the homelab job either passed or was skipped.
+    if: ${{ !cancelled() && needs.deploy-staging.result == 'success' && (needs.deploy-homelab.result == 'success' || needs.deploy-homelab.result == 'skipped') }}
+    needs: [build, deploy-staging, deploy-homelab]
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_deploy-azure.yml # 'prod' environment has required reviewers
+    with:
+      environment: prod
+      image: ${{ needs.build.outputs.image }}
+      version: ${{ github.sha }}

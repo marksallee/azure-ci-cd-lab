@@ -1,0 +1,11 @@
+services:
+  app:
+    image: ${IMAGE:?IMAGE must be set (the workflow passes the digest-pinned image)}
+    container_name: azure-ci-cd-lab
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      APP_ENV: homelab
+      APP_PLATFORM: self-hosted-vm
+      APP_VERSION: ${APP_VERSION:-unset}

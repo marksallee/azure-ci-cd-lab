@@ -1,0 +1,51 @@
+name: Destroy lab environment
+
+# Manual teardown. Type DESTROY to confirm. Uses the same GitHub environments,
+# so destroying prod still requires the prod reviewer's approval.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to destroy
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      confirm:
+        description: Type DESTROY to confirm
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    if: ${{ inputs.confirm == 'DESTROY' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=${{ inputs.environment }}.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+      - run: terraform destroy -input=false -auto-approve -var-file=envs/${{ inputs.environment }}.tfvars

@@ -1,0 +1,9 @@
+.git
+.github
+infra
+scripts
+deploy
+**/__pycache__
+**/.terraform
+*.tfstate*
+dotnet

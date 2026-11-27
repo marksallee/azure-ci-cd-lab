@@ -1,0 +1,91 @@
+name: _deploy-azure (reusable)
+
+# One deploy definition, three environments. The approval gate lives on the
+# GitHub *environment* (Settings > Environments), not in this file, so the same
+# job pauses for review in prod and runs straight through in dev.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: dev | staging | prod
+        required: true
+        type: string
+      image:
+        description: Image reference pinned by digest (ghcr.io/owner/repo@sha256:...)
+        required: true
+        type: string
+      version:
+        description: Git SHA being deployed
+        required: true
+        type: string
+
+permissions:
+  id-token: write # OIDC token for azure/login
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.out.outputs.url }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # so `terraform output -raw` is clean
+
+      - name: Terraform init (state key per environment)
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=${{ inputs.environment }}.tfstate" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform plan
+        run: |
+          terraform plan -input=false -out=tfplan \
+            -var-file=envs/${{ inputs.environment }}.tfvars \
+            -var="image=${{ inputs.image }}" \
+            -var="app_version=${{ inputs.version }}"
+
+      - name: Terraform apply
+        run: terraform apply -input=false tfplan
+
+      - name: Read outputs
+        id: out
+        run: echo "url=$(terraform output -raw url)" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test (health + exact build SHA)
+        working-directory: .
+        run: |
+          url="${{ steps.out.outputs.url }}"
+          for i in $(seq 1 30); do
+            if curl -fsS "$url/healthz" >/dev/null; then break; fi
+            echo "waiting for $url ($i/30)"; sleep 10
+          done
+          body=$(curl -fsS "$url/version")
+          echo "$body"
+          echo "$body" | grep -q "\"version\": \"${{ inputs.version }}\"" \
+            || { echo "::error::deployed version does not match ${{ inputs.version }}"; exit 1; }
+          echo "### ${{ inputs.environment }} deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${{ inputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"

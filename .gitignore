@@ -1,0 +1,15 @@
+__pycache__/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+.env
+
+# Never commit local notes or handoff files
+HANDOFF.md
+*.local.md
+.DS_Store
+bin/
+obj/
